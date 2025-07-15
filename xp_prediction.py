@@ -6,9 +6,12 @@ from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import make_pipeline
 from xgboost import XGBRegressor
 from sklearn.metrics import mean_squared_error
+from ftfy import fix_text
+
+import csv_additions
 
 # Load CSV
-df = pd.read_csv("/Users/ayushsingh/Desktop/repos/shots.csv")
+df = pd.read_csv("/Users/ayushsingh/Desktop/repos/shots.csv",  encoding='utf-8')
 
 # Step 1: Filter to shot attempts only
 df_clean = df[df["SHOT_ATTEMPTED_FLAG"] == 1].copy()
@@ -59,20 +62,35 @@ print(f"Model MSE: {mse:.3f}")
 df_clean["xP_pred"] = model.predict(X)
 df_clean["Points"] = df_clean["xP_target"]
 
-# Step 9: Aggregate player-level summary
-player_summary = df_clean.groupby(["PLAYER_NAME", "TEAM_NAME"]).agg(
+# Step 9: Get the most recent team for each player (assuming data is ordered chronologically)
+# If you have a date column, you can use that instead of index
+player_current_team = df_clean.groupby("PLAYER_NAME")["TEAM_NAME"].last().reset_index()
+player_current_team.columns = ["PLAYER_NAME", "CURRENT_TEAM"]
+
+# Step 10: Aggregate player-level summary (now only by player, not by team)
+player_summary = df_clean.groupby("PLAYER_NAME").agg(
     Total_Shots=("Points", "count"),
     Total_Points=("Points", "sum"),
     Total_xP=("xP_pred", "sum")
 ).reset_index()
 
+# Step 11: Add current team information
+player_summary = player_summary.merge(player_current_team, on="PLAYER_NAME", how="left")
+player_summary = player_summary.rename(columns={"CURRENT_TEAM": "TEAM_NAME"})
+
+# Step 12: Calculate performance metrics
 player_summary["Overperformance"] = player_summary["Total_Points"] - player_summary["Total_xP"]
 player_summary["xP_per_Shot"] = player_summary["Total_xP"] / player_summary["Total_Shots"]
 player_summary["Overperf_per_Shot"] = player_summary["Overperformance"] / player_summary["Total_Shots"]
 
-# Sort by Total Points
+# Sort by overperformance per shot
 player_summary = player_summary.sort_values("Overperf_per_Shot", ascending=False)
-player_summary.to_csv('xp.csv', index=False)
+
+# Save to CSV
+player_summary.to_csv('xp.csv', index=False, encoding='utf-8')
+
+# Apply additional processing
+csv_additions.add_games_played_to_csv('xp.csv')
 
 # Preview
 print(player_summary.head(10))
