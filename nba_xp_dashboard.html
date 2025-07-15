@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NBA Expected Points Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            padding: 30px;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+        .controls {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: space-between;
+        }
+        .search-container {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        input[type="text"] {
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            width: 200px;
+        }
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #4CAF50;
+        }
+        .checkbox-container {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .checkbox-container input[type="checkbox"] {
+            transform: scale(1.2);
+        }
+        .checkbox-container label {
+            font-size: 14px;
+            color: #555;
+            cursor: pointer;
+        }
+        .table-container {
+            overflow-x: auto;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        th, td {
+            padding: 12px 10px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+        th {
+            background-color: #f8f9fa;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            cursor: pointer;
+            user-select: none;
+        }
+        th:hover {
+            background-color: #e9ecef;
+        }
+        th.sortable::after {
+            content: ' ↕';
+            opacity: 0.5;
+        }
+        th.sort-asc::after {
+            content: ' ↑';
+            opacity: 1;
+            color: #4CAF50;
+        }
+        th.sort-desc::after {
+            content: ' ↓';
+            opacity: 1;
+            color: #4CAF50;
+        }
+        tr:hover {
+            background-color: #f8f9fa;
+        }
+        tr:nth-child(even) {
+            background-color: #fafafa;
+        }
+        tr:nth-child(even):hover {
+            background-color: #f0f0f0;
+        }
+        .numeric {
+            text-align: right;
+        }
+        .positive {
+            color: #4CAF50;
+        }
+        .negative {
+            color: #f44336;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            font-style: italic;
+        }
+        .error-message {
+            color: #d32f2f;
+            text-align: center;
+            margin: 20px 0;
+            padding: 15px;
+            background: #ffebee;
+            border-radius: 5px;
+            border: 1px solid #ffcdd2;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>NBA Expected Points Dashboard</h1>
+        
+        <div id="errorMessage" class="error-message" style="display: none;"></div>
+        
+
+        
+        <div class="controls">
+            <div class="search-container">
+                <input type="text" id="playerSearch" placeholder="Search players..." />
+                <input type="text" id="teamSearch" placeholder="Search teams..." />
+            </div>
+            <div class="checkbox-container">
+                <input type="checkbox" id="hideNonQualifiers" />
+                <label for="hideNonQualifiers">When table is sorted, hide non-qualifiers for rate stats</label>
+            </div>
+        </div>
+        
+        <div class="table-container">
+            <table id="playerTable">
+                <thead>
+                    <tr>
+                        <th data-column="PLAYER_NAME" class="sortable">Player</th>
+                        <th data-column="TEAM_NAME" class="sortable">Team</th>
+                        <th data-column="GamesPlayed" class="sortable numeric">Games</th>
+                        <th data-column="Total_Shots" class="sortable numeric">Total Shots</th>
+                        <th data-column="Total_Points" class="sortable numeric">Total Points</th>
+                        <th data-column="Total_xP" class="sortable numeric">Total xP</th>
+                        <th data-column="Overperformance" class="sortable numeric">Overperformance</th>
+                        <th data-column="xP_per_Shot" class="sortable numeric">xP per Shot</th>
+                        <th data-column="Overperf_per_Shot" class="sortable numeric">Overperf per Shot</th>
+                    </tr>
+                </thead>
+                <tbody id="playerTableBody">
+                    <tr><td colspan="9" class="loading">Loading data...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let playerData = [];
+        let filteredData = [];
+        let currentSort = { column: null, direction: 'asc' };
+
+        // Load CSV data automatically when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            loadCSV();
+        });
+
+        function loadCSV() {
+            // First try to load from same directory
+            fetch('xp.csv')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Could not load xp.csv file');
+                    }
+                    return response.text();
+                })
+                .then(csvText => {
+                    parseCSVData(csvText);
+                })
+                .catch(error => {
+                    // If fetch fails, show instructions for local file access
+                    showError(`Cannot load CSV file directly from local filesystem. 
+                    
+                    To fix this, you have a few options:
+                    
+                    1. Run a local server:
+                       - Open terminal/command prompt in this directory
+                       - Run: python -m http.server 8000
+                       - Then go to http://localhost:8000
+                    
+                    2. Or drag and drop your xp.csv file onto the box below:`);
+                    
+                    // Add file drop zone
+                    addFileDropZone();
+                });
+        }
+
+        function parseCSVData(csvText) {
+            Papa.parse(csvText, {
+                header: true,
+                dynamicTyping: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    if (results.errors.length > 0) {
+                        showError('Error parsing CSV: ' + results.errors[0].message);
+                        return;
+                    }
+                    
+                    playerData = results.data.filter(row => row.PLAYER_NAME); // Filter out empty rows
+                    filteredData = [...playerData];
+                    
+                    // Clear any previous errors
+                    document.getElementById('errorMessage').style.display = 'none';
+                    
+                    renderTable();
+                    setupEventListeners();
+                }
+            });
+        }
+
+        function addFileDropZone() {
+            const container = document.querySelector('.container');
+            const dropZone = document.createElement('div');
+            dropZone.innerHTML = `
+                <div style="border: 2px dashed #ccc; padding: 40px; text-align: center; margin: 20px 0; border-radius: 10px;">
+                    <p>Drag and drop your xp.csv file here, or click to select</p>
+                    <input type="file" id="csvFileInput" accept=".csv" style="display: none;">
+                    <button onclick="document.getElementById('csvFileInput').click()" style="background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;">Select CSV File</button>
+                </div>
+            `;
+            
+            container.insertBefore(dropZone, container.children[2]);
+            
+            // Add drag and drop functionality
+            const dropArea = dropZone.querySelector('div');
+            const fileInput = dropZone.querySelector('#csvFileInput');
+            
+            dropArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropArea.style.backgroundColor = '#f0f8ff';
+            });
+            
+            dropArea.addEventListener('dragleave', () => {
+                dropArea.style.backgroundColor = '';
+            });
+            
+            dropArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropArea.style.backgroundColor = '';
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    handleFile(files[0]);
+                }
+            });
+            
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    handleFile(e.target.files[0]);
+                }
+            });
+        }
+
+        function handleFile(file) {
+            if (!file.name.endsWith('.csv')) {
+                showError('Please select a CSV file');
+                return;
+            }
+            
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                parseCSVData(e.target.result);
+            };
+            reader.readAsText(file);
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            
+            // Show error in table
+            document.getElementById('playerTableBody').innerHTML = 
+                '<tr><td colspan="9" class="loading">Failed to load data</td></tr>';
+        }
+
+
+
+        function renderTable() {
+            const tbody = document.getElementById('playerTableBody');
+            tbody.innerHTML = '';
+
+            if (filteredData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" class="loading">No data matches your search criteria</td></tr>';
+                return;
+            }
+
+            filteredData.forEach(player => {
+                const row = document.createElement('tr');
+                
+                // Format numeric values and add color coding
+                const overperf = player.Overperformance || 0;
+                const overperfPerShot = player.Overperf_per_Shot || 0;
+                
+                const overperfClass = overperf > 0 ? 'positive' : overperf < 0 ? 'negative' : '';
+                const overperfPerShotClass = overperfPerShot > 0 ? 'positive' : overperfPerShot < 0 ? 'negative' : '';
+                
+                row.innerHTML = `
+                    <td>${player.PLAYER_NAME || ''}</td>
+                    <td>${player.TEAM_NAME || ''}</td>
+                    <td class="numeric">${player.GamesPlayed || 0}</td>
+                    <td class="numeric">${player.Total_Shots || 0}</td>
+                    <td class="numeric">${player.Total_Points || 0}</td>
+                    <td class="numeric">${typeof player.Total_xP === 'number' ? player.Total_xP.toFixed(2) : player.Total_xP || 0}</td>
+                    <td class="numeric ${overperfClass}">${typeof overperf === 'number' ? overperf.toFixed(2) : overperf}</td>
+                    <td class="numeric">${typeof player.xP_per_Shot === 'number' ? player.xP_per_Shot.toFixed(3) : player.xP_per_Shot || 0}</td>
+                    <td class="numeric ${overperfPerShotClass}">${typeof overperfPerShot === 'number' ? overperfPerShot.toFixed(3) : overperfPerShot}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function setupEventListeners() {
+            // Search functionality
+            document.getElementById('playerSearch').addEventListener('input', filterData);
+            document.getElementById('teamSearch').addEventListener('input', filterData);
+            document.getElementById('hideNonQualifiers').addEventListener('change', filterData);
+
+            // Sort functionality - attach to all sortable headers
+            document.querySelectorAll('th.sortable').forEach(header => {
+                header.addEventListener('click', function() {
+                    const column = this.dataset.column;
+                    console.log('Sorting by column:', column); // Debug log
+                    sortTable(column);
+                });
+            });
+        }
+
+        function filterData() {
+            const playerSearch = document.getElementById('playerSearch').value.toLowerCase();
+            const teamSearch = document.getElementById('teamSearch').value.toLowerCase();
+            const hideNonQualifiers = document.getElementById('hideNonQualifiers').checked;
+
+            filteredData = playerData.filter(player => {
+                const matchesPlayer = !playerSearch || 
+                    (player.PLAYER_NAME && player.PLAYER_NAME.toLowerCase().includes(playerSearch));
+                const matchesTeam = !teamSearch || 
+                    (player.TEAM_NAME && player.TEAM_NAME.toLowerCase().includes(teamSearch));
+                
+                // Only hide non-qualifiers if checkbox is checked AND we're sorting by a rate stat
+                const rateStats = ['xP_per_Shot', 'Overperf_per_Shot'];
+                const isRateStat = rateStats.includes(currentSort.column);
+                const meetsGamesRequirement = !hideNonQualifiers || !isRateStat || (player.GamesPlayed >= 58);
+
+                return matchesPlayer && matchesTeam && meetsGamesRequirement;
+            });
+
+            // Apply current sort to filtered data
+            if (currentSort.column) {
+                applySortToFilteredData();
+            }
+
+            renderTable();
+        }
+
+        function applySortToFilteredData() {
+            const column = currentSort.column;
+            const direction = currentSort.direction;
+            
+            filteredData.sort((a, b) => {
+                let valueA = a[column];
+                let valueB = b[column];
+
+                // Handle null/undefined values
+                if (valueA == null) valueA = direction === 'asc' ? '' : -Infinity;
+                if (valueB == null) valueB = direction === 'asc' ? '' : -Infinity;
+
+                // For numeric columns, convert to numbers
+                const numericColumns = ['GamesPlayed', 'Total_Shots', 'Total_Points', 'Total_xP', 'Overperformance', 'xP_per_Shot', 'Overperf_per_Shot'];
+                if (numericColumns.includes(column)) {
+                    valueA = parseFloat(valueA) || 0;
+                    valueB = parseFloat(valueB) || 0;
+                } else {
+                    // For text columns, convert to string and make case-insensitive
+                    valueA = String(valueA).toLowerCase();
+                    valueB = String(valueB).toLowerCase();
+                }
+
+                let result;
+                if (valueA > valueB) {
+                    result = 1;
+                } else if (valueA < valueB) {
+                    result = -1;
+                } else {
+                    result = 0;
+                }
+
+                return direction === 'desc' ? -result : result;
+            });
+        }
+
+        function sortTable(column) {
+            console.log('sortTable called with column:', column); // Debug log
+            
+            // Determine sort direction
+            const direction = currentSort.column === column && currentSort.direction === 'asc' ? 'desc' : 'asc';
+            currentSort = { column, direction };
+
+            // Update header classes
+            document.querySelectorAll('th').forEach(th => {
+                th.classList.remove('sort-asc', 'sort-desc');
+            });
+            const headerElement = document.querySelector(`th[data-column="${column}"]`);
+            if (headerElement) {
+                headerElement.classList.add(`sort-${direction}`);
+            }
+
+            // Apply sort to current filtered data
+            applySortToFilteredData();
+
+            console.log('First few sorted items:', filteredData.slice(0, 3)); // Debug log
+
+            // Re-render table with sorted data
+            renderTable();
+        }
+    </script>
+</body>
+</html>
