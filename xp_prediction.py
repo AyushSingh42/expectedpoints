@@ -91,6 +91,7 @@ player_summary.to_csv('xp.csv', index=False, encoding='utf-8')
 
 # Apply additional processing
 csv_additions.add_games_played_to_csv('xp.csv')
+csv_additions.add_team_to_csv('xp.csv')
 
 # Preview
 print(player_summary.head(10))
