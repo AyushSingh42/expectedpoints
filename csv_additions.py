@@ -13,6 +13,8 @@ def get_games_played_dict(season="2024-25", season_type="Regular Season"):
     )
     df = stats.get_data_frames()[0]
     df = df[['PLAYER_NAME', 'GP']]
+    # Filter out null player names
+    df = df.dropna(subset=['PLAYER_NAME'])
     return dict(zip(df['PLAYER_NAME'], df['GP']))
 
 def get_team_dict(season="2024-25", season_type="Regular Season"):
@@ -25,7 +27,35 @@ def get_team_dict(season="2024-25", season_type="Regular Season"):
     )
     df = stats.get_data_frames()[0]
     df = df[['PLAYER_NAME', 'TEAM_ABBREVIATION']]
+    # Filter out null player names
+    df = df.dropna(subset=['PLAYER_NAME'])
     return dict(zip(df['PLAYER_NAME'], df['TEAM_ABBREVIATION']))
+
+def normalize_name(name):
+    """Normalize name for matching - remove accents, convert to lowercase, handle punctuation"""
+    # Handle None/null values
+    if name is None or pd.isna(name):
+        return ""
+    
+    # Convert to string if not already
+    name = str(name).strip()
+    
+    # Handle empty string
+    if not name:
+        return ""
+    
+    try:
+        # Remove accents
+        normalized = unicodedata.normalize('NFD', name)
+        ascii_name = ''.join(c for c in normalized if unicodedata.category(c) != 'Mn')
+        # Remove dots and normalize spacing
+        ascii_name = ascii_name.replace('.', '').replace('-', ' ').strip()
+        # Normalize multiple spaces to single space
+        ascii_name = ' '.join(ascii_name.split())
+        return ascii_name.lower()
+    except Exception as e:
+        print(f"Warning: Could not normalize name '{name}': {e}")
+        return str(name).lower()
 
 def add_games_played_to_csv(csv_path="xp.csv", output_path="xp.csv"):
     # Load original CSV with proper encoding
@@ -35,46 +65,42 @@ def add_games_played_to_csv(csv_path="xp.csv", output_path="xp.csv"):
     if 'PLAYER_NAME' not in xp_df.columns:
         raise ValueError("Input CSV must have a 'PLAYER_NAME' column.")
     
-    # Fix corrupted text
-    xp_df['PLAYER_NAME'] = xp_df['PLAYER_NAME'].apply(lambda x: fix_text(str(x)))
+    # Fix corrupted text and handle null values
+    xp_df['PLAYER_NAME'] = xp_df['PLAYER_NAME'].apply(lambda x: fix_text(str(x)) if x is not None and pd.notna(x) else str(x))
     
     # Get games played info
     gp_dict = get_games_played_dict()
     
     # Create normalized lookup dictionary
-    def normalize_name(name):
-        """Normalize name for matching - remove accents, convert to lowercase, handle punctuation"""
-        # Remove accents
-        normalized = unicodedata.normalize('NFD', name)
-        ascii_name = ''.join(c for c in normalized if unicodedata.category(c) != 'Mn')
-        # Remove dots and normalize spacing
-        ascii_name = ascii_name.replace('.', '').replace('-', ' ').strip()
-        # Normalize multiple spaces to single space
-        ascii_name = ' '.join(ascii_name.split())
-        return ascii_name.lower()
-    
-    # Create normalized lookup dictionary
     normalized_gp_dict = {}
     for player_name, gp in gp_dict.items():
-        normalized_key = normalize_name(player_name)
-        normalized_gp_dict[normalized_key] = gp
+        if player_name is not None and pd.notna(player_name):
+            normalized_key = normalize_name(player_name)
+            if normalized_key:  # Only add if normalization was successful
+                normalized_gp_dict[normalized_key] = gp
     
     # Track players not found for reporting
     players_not_found = []
     
     def get_gp(player_name):
+        # Handle null/empty player names
+        if player_name is None or pd.isna(player_name) or str(player_name).strip() == "":
+            return None
+            
+        player_name = str(player_name).strip()
+        
         # First try exact match
         if player_name in gp_dict:
             return gp_dict[player_name]
         
         # Try normalized match
         normalized_name = normalize_name(player_name)
-        if normalized_name in normalized_gp_dict:
+        if normalized_name and normalized_name in normalized_gp_dict:
             return normalized_gp_dict[normalized_name]
         
         # Try partial matching (for cases like "D.J. Carton" vs "DJ Carton")
         for stats_name, gp in gp_dict.items():
-            if normalize_name(stats_name) == normalized_name:
+            if stats_name and normalize_name(stats_name) == normalized_name:
                 return gp
         
         # Try fuzzy matching based on last name + first letter
@@ -85,15 +111,16 @@ def add_games_played_to_csv(csv_path="xp.csv", output_path="xp.csv"):
                 first_initial = parts[0][0].lower()
                 
                 for stats_name, gp in gp_dict.items():
-                    stats_parts = stats_name.split()
-                    if len(stats_parts) >= 2:
-                        stats_last = stats_parts[-1].lower()
-                        stats_first_initial = stats_parts[0][0].lower()
-                        
-                        if (last_name == stats_last and 
-                            first_initial == stats_first_initial):
-                            print(f"Fuzzy match: '{player_name}' -> '{stats_name}'")
-                            return gp
+                    if stats_name:
+                        stats_parts = stats_name.split()
+                        if len(stats_parts) >= 2:
+                            stats_last = stats_parts[-1].lower()
+                            stats_first_initial = stats_parts[0][0].lower()
+                            
+                            if (last_name == stats_last and 
+                                first_initial == stats_first_initial):
+                                print(f"Fuzzy match: '{player_name}' -> '{stats_name}'")
+                                return gp
         except (IndexError, AttributeError):
             pass
         
@@ -112,12 +139,13 @@ def add_games_played_to_csv(csv_path="xp.csv", output_path="xp.csv"):
             
             # Show potential matches
             print("    Potential matches:")
-            player_parts = player.lower().split()
+            player_parts = str(player).lower().split()
             for stats_name in sorted(gp_dict.keys()):
-                stats_parts = stats_name.lower().split()
-                # Check if any part of the name matches
-                if any(part in stats_name.lower() for part in player_parts):
-                    print(f"      - {stats_name}")
+                if stats_name:
+                    stats_parts = stats_name.lower().split()
+                    # Check if any part of the name matches
+                    if any(part in stats_name.lower() for part in player_parts):
+                        print(f"      - {stats_name}")
             print()
     
     # Option 1: Fill missing values with 0 (conservative approach)
@@ -141,46 +169,42 @@ def add_team_to_csv(csv_path="xp.csv", output_path="xp.csv"):
     if 'PLAYER_NAME' not in xp_df.columns:
         raise ValueError("Input CSV must have a 'PLAYER_NAME' column.")
     
-    # Fix corrupted text
-    xp_df['PLAYER_NAME'] = xp_df['PLAYER_NAME'].apply(lambda x: fix_text(str(x)))
+    # Fix corrupted text and handle null values
+    xp_df['PLAYER_NAME'] = xp_df['PLAYER_NAME'].apply(lambda x: fix_text(str(x)) if x is not None and pd.notna(x) else str(x))
     
     # Get team info
     team_dict = get_team_dict()
     
     # Create normalized lookup dictionary
-    def normalize_name(name):
-        """Normalize name for matching - remove accents, convert to lowercase, handle punctuation"""
-        # Remove accents
-        normalized = unicodedata.normalize('NFD', name)
-        ascii_name = ''.join(c for c in normalized if unicodedata.category(c) != 'Mn')
-        # Remove dots and normalize spacing
-        ascii_name = ascii_name.replace('.', '').replace('-', ' ').strip()
-        # Normalize multiple spaces to single space
-        ascii_name = ' '.join(ascii_name.split())
-        return ascii_name.lower()
-    
-    # Create normalized lookup dictionary
     normalized_team_dict = {}
     for player_name, team in team_dict.items():
-        normalized_key = normalize_name(player_name)
-        normalized_team_dict[normalized_key] = team
+        if player_name is not None and pd.notna(player_name):
+            normalized_key = normalize_name(player_name)
+            if normalized_key:  # Only add if normalization was successful
+                normalized_team_dict[normalized_key] = team
     
     # Track players not found for reporting
     players_not_found = []
     
     def get_team(player_name):
+        # Handle null/empty player names
+        if player_name is None or pd.isna(player_name) or str(player_name).strip() == "":
+            return None
+            
+        player_name = str(player_name).strip()
+        
         # First try exact match
         if player_name in team_dict:
             return team_dict[player_name]
         
         # Try normalized match
         normalized_name = normalize_name(player_name)
-        if normalized_name in normalized_team_dict:
+        if normalized_name and normalized_name in normalized_team_dict:
             return normalized_team_dict[normalized_name]
         
         # Try partial matching (for cases like "D.J. Carton" vs "DJ Carton")
         for stats_name, team in team_dict.items():
-            if normalize_name(stats_name) == normalized_name:
+            if stats_name and normalize_name(stats_name) == normalized_name:
                 return team
         
         # Try fuzzy matching based on last name + first letter
@@ -191,15 +215,16 @@ def add_team_to_csv(csv_path="xp.csv", output_path="xp.csv"):
                 first_initial = parts[0][0].lower()
                 
                 for stats_name, team in team_dict.items():
-                    stats_parts = stats_name.split()
-                    if len(stats_parts) >= 2:
-                        stats_last = stats_parts[-1].lower()
-                        stats_first_initial = stats_parts[0][0].lower()
-                        
-                        if (last_name == stats_last and 
-                            first_initial == stats_first_initial):
-                            print(f"Fuzzy match: '{player_name}' -> '{stats_name}'")
-                            return team
+                    if stats_name:
+                        stats_parts = stats_name.split()
+                        if len(stats_parts) >= 2:
+                            stats_last = stats_parts[-1].lower()
+                            stats_first_initial = stats_parts[0][0].lower()
+                            
+                            if (last_name == stats_last and 
+                                first_initial == stats_first_initial):
+                                print(f"Fuzzy match: '{player_name}' -> '{stats_name}'")
+                                return team
         except (IndexError, AttributeError):
             pass
         
@@ -218,12 +243,13 @@ def add_team_to_csv(csv_path="xp.csv", output_path="xp.csv"):
             
             # Show potential matches
             print("    Potential matches:")
-            player_parts = player.lower().split()
+            player_parts = str(player).lower().split()
             for stats_name in sorted(team_dict.keys()):
-                stats_parts = stats_name.lower().split()
-                # Check if any part of the name matches
-                if any(part in stats_name.lower() for part in player_parts):
-                    print(f"      - {stats_name}")
+                if stats_name:
+                    stats_parts = stats_name.lower().split()
+                    # Check if any part of the name matches
+                    if any(part in stats_name.lower() for part in player_parts):
+                        print(f"      - {stats_name}")
             print()
     
     # Option 1: Fill missing values with "Unknown" (conservative approach)

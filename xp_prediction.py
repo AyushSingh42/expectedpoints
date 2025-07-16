@@ -67,18 +67,40 @@ df_clean["Points"] = df_clean["xP_target"]
 player_current_team = df_clean.groupby("PLAYER_NAME")["TEAM_NAME"].last().reset_index()
 player_current_team.columns = ["PLAYER_NAME", "CURRENT_TEAM"]
 
-# Step 10: Aggregate player-level summary (now only by player, not by team)
+# Step 10: Create Action Type aggregations
+action_type_summary = df_clean.groupby(["PLAYER_NAME", "ACTION_TYPE"]).agg(
+    Shots=("Points", "count"),
+    Points=("Points", "sum"),
+    xP=("xP_pred", "sum")
+).reset_index()
+
+action_type_summary["Overperformance"] = action_type_summary["Points"] - action_type_summary["xP"]
+action_type_summary["xP_per_Shot"] = action_type_summary["xP"] / action_type_summary["Shots"]
+action_type_summary["Overperf_per_Shot"] = action_type_summary["Overperformance"] / action_type_summary["Shots"]
+
+# Step 11: Create Shot Zone aggregations
+shot_zone_summary = df_clean.groupby(["PLAYER_NAME", "SHOT_ZONE_BASIC"]).agg(
+    Shots=("Points", "count"),
+    Points=("Points", "sum"),
+    xP=("xP_pred", "sum")
+).reset_index()
+
+shot_zone_summary["Overperformance"] = shot_zone_summary["Points"] - shot_zone_summary["xP"]
+shot_zone_summary["xP_per_Shot"] = shot_zone_summary["xP"] / shot_zone_summary["Shots"]
+shot_zone_summary["Overperf_per_Shot"] = shot_zone_summary["Overperformance"] / shot_zone_summary["Shots"]
+
+# Step 12: Aggregate player-level summary (now only by player, not by team)
 player_summary = df_clean.groupby("PLAYER_NAME").agg(
     Total_Shots=("Points", "count"),
     Total_Points=("Points", "sum"),
     Total_xP=("xP_pred", "sum")
 ).reset_index()
 
-# Step 11: Add current team information
+# Step 13: Add current team information
 player_summary = player_summary.merge(player_current_team, on="PLAYER_NAME", how="left")
 player_summary = player_summary.rename(columns={"CURRENT_TEAM": "TEAM_NAME"})
 
-# Step 12: Calculate performance metrics
+# Step 14: Calculate performance metrics
 player_summary["Overperformance"] = player_summary["Total_Points"] - player_summary["Total_xP"]
 player_summary["xP_per_Shot"] = player_summary["Total_xP"] / player_summary["Total_Shots"]
 player_summary["Overperf_per_Shot"] = player_summary["Overperformance"] / player_summary["Total_Shots"]
@@ -86,12 +108,80 @@ player_summary["Overperf_per_Shot"] = player_summary["Overperformance"] / player
 # Sort by overperformance per shot
 player_summary = player_summary.sort_values("Overperf_per_Shot", ascending=False)
 
-# Save to CSV
+# Step 15: Save all CSVs
 player_summary.to_csv('xp.csv', index=False, encoding='utf-8')
+action_type_summary.to_csv('xp_by_action_type.csv', index=False, encoding='utf-8')
+shot_zone_summary.to_csv('xp_by_shot_zone.csv', index=False, encoding='utf-8')
 
-# Apply additional processing
+# Apply additional processing to main CSV
 csv_additions.add_games_played_to_csv('xp.csv')
 csv_additions.add_team_to_csv('xp.csv')
 
+# Step 16: Create a comprehensive CSV with all breakdowns
+# This will create a master CSV where each player has their overall stats plus breakdowns
+comprehensive_data = []
+
+for _, player in player_summary.iterrows():
+    player_name = player['PLAYER_NAME']
+    
+    # Add overall player stats
+    base_row = {
+        'PLAYER_NAME': player_name,
+        'TEAM_NAME': player['TEAM_NAME'],
+        'Category': 'Overall',
+        'Category_Value': 'Overall',
+        'Shots': player['Total_Shots'],
+        'Points': player['Total_Points'],
+        'xP': player['Total_xP'],
+        'Overperformance': player['Overperformance'],
+        'xP_per_Shot': player['xP_per_Shot'],
+        'Overperf_per_Shot': player['Overperf_per_Shot']
+    }
+    comprehensive_data.append(base_row)
+    
+    # Add action type breakdowns
+    player_action_types = action_type_summary[action_type_summary['PLAYER_NAME'] == player_name]
+    for _, action_row in player_action_types.iterrows():
+        action_data = {
+            'PLAYER_NAME': player_name,
+            'TEAM_NAME': player['TEAM_NAME'],
+            'Category': 'Action_Type',
+            'Category_Value': action_row['ACTION_TYPE'],
+            'Shots': action_row['Shots'],
+            'Points': action_row['Points'],
+            'xP': action_row['xP'],
+            'Overperformance': action_row['Overperformance'],
+            'xP_per_Shot': action_row['xP_per_Shot'],
+            'Overperf_per_Shot': action_row['Overperf_per_Shot']
+        }
+        comprehensive_data.append(action_data)
+    
+    # Add shot zone breakdowns
+    player_shot_zones = shot_zone_summary[shot_zone_summary['PLAYER_NAME'] == player_name]
+    for _, zone_row in player_shot_zones.iterrows():
+        zone_data = {
+            'PLAYER_NAME': player_name,
+            'TEAM_NAME': player['TEAM_NAME'],
+            'Category': 'Shot_Zone',
+            'Category_Value': zone_row['SHOT_ZONE_BASIC'],
+            'Shots': zone_row['Shots'],
+            'Points': zone_row['Points'],
+            'xP': zone_row['xP'],
+            'Overperformance': zone_row['Overperformance'],
+            'xP_per_Shot': zone_row['xP_per_Shot'],
+            'Overperf_per_Shot': zone_row['Overperf_per_Shot']
+        }
+        comprehensive_data.append(zone_data)
+
+# Create comprehensive DataFrame and save
+comprehensive_df = pd.DataFrame(comprehensive_data)
+comprehensive_df.to_csv('xp_comprehensive.csv', index=False, encoding='utf-8')
+
 # Preview
+print("Overall Player Summary:")
 print(player_summary.head(10))
+print("\nAction Type Breakdown Sample:")
+print(action_type_summary.head(10))
+print("\nShot Zone Breakdown Sample:")
+print(shot_zone_summary.head(10))
+print("\nComprehensive CSV created with all breakdowns!")
