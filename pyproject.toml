@@ -1,0 +1,19 @@
+[project]
+name = "nba-xp-prediction"
+version = "0.1.0"
+description = "A model that predicts expected points from NBA shot-level data"
+authors = [
+    { name = "Ayush Singh" }
+]
+dependencies = [
+    "pandas",
+    "numpy",
+    "scikit-learn",
+    "xgboost",
+    "ftfy",
+    "nba_api",
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
