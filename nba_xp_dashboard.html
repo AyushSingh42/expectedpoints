@@ -38,6 +38,7 @@
             display: flex;
             gap: 10px;
             align-items: center;
+            flex-wrap: wrap;
         }
         input[type="text"] {
             padding: 8px 12px;
@@ -47,6 +48,18 @@
             width: 200px;
         }
         input[type="text"]:focus {
+            outline: none;
+            border-color: #4CAF50;
+        }
+        select {
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            width: 200px;
+            background-color: white;
+        }
+        select:focus {
             outline: none;
             border-color: #4CAF50;
         }
@@ -93,16 +106,16 @@
             background-color: #e9ecef;
         }
         th.sortable::after {
-            content: ' â†•';
+            content: ' •';
             opacity: 0.5;
         }
         th.sort-asc::after {
-            content: ' â†‘';
+            content: ' ‘';
             opacity: 1;
             color: #4CAF50;
         }
         th.sort-desc::after {
-            content: ' â†“';
+            content: ' “';
             opacity: 1;
             color: #4CAF50;
         }
@@ -153,6 +166,12 @@
             <div class="search-container">
                 <input type="text" id="playerSearch" placeholder="Search players..." />
                 <input type="text" id="teamSearch" placeholder="Search teams..." />
+                <select id="shotTypeFilter">
+                    <option value="">All Shot Types</option>
+                </select>
+                <select id="shotZoneFilter">
+                    <option value="">All Shot Zones</option>
+                </select>
             </div>
             <div class="checkbox-container">
                 <input type="checkbox" id="hideNonQualifiers" />
@@ -167,9 +186,9 @@
                         <th data-column="PLAYER_NAME" class="sortable">Player</th>
                         <th data-column="TEAM_NAME" class="sortable">Team</th>
                         <th data-column="GamesPlayed" class="sortable numeric">Games</th>
-                        <th data-column="Total_Shots" class="sortable numeric">Total Shots</th>
-                        <th data-column="Total_Points" class="sortable numeric">Total Points</th>
-                        <th data-column="Total_xP" class="sortable numeric">Total xP</th>
+                        <th data-column="Shots" class="sortable numeric">Total Shots</th>
+                        <th data-column="Points" class="sortable numeric">Total Points</th>
+                        <th data-column="xP" class="sortable numeric">Total xP</th>
                         <th data-column="Overperformance" class="sortable numeric">Overperformance</th>
                         <th data-column="xP_per_Shot" class="sortable numeric">xP per Shot</th>
                         <th data-column="Overperf_per_Shot" class="sortable numeric">Overperf per Shot</th>
@@ -183,9 +202,12 @@
     </div>
 
     <script>
+        let rawData = [];
         let playerData = [];
         let filteredData = [];
         let currentSort = { column: null, direction: 'asc' };
+        let shotTypes = new Set();
+        let shotZones = new Set();
 
         // Load CSV data automatically when page loads
         document.addEventListener('DOMContentLoaded', function() {
@@ -194,10 +216,10 @@
 
         function loadCSV() {
             // First try to load from same directory
-            fetch('xp.csv')
+            fetch('xp_comprehensive.csv')
                 .then(response => {
                     if (!response.ok) {
-                        throw new Error('Could not load xp.csv file');
+                        throw new Error('Could not load xp_comprehensive.csv file');
                     }
                     return response.text();
                 })
@@ -215,7 +237,7 @@
                        - Run: python -m http.server 8000
                        - Then go to http://localhost:8000
                     
-                    2. Or drag and drop your xp.csv file onto the box below:`);
+                    2. Or drag and drop your xp_comprehensive.csv file onto the box below:`);
                     
                     // Add file drop zone
                     addFileDropZone();
@@ -233,7 +255,21 @@
                         return;
                     }
                     
-                    playerData = results.data.filter(row => row.PLAYER_NAME); // Filter out empty rows
+                    rawData = results.data.filter(row => row.PLAYER_NAME); // Filter out empty rows
+                    
+                    // Populate shot types and shot zones
+                    rawData.forEach(row => {
+                        if(row.Category === 'Shot_Type') {
+                            shotTypes.add(row.Category_Value);
+                        } else if(row.Category === 'Shot_Zone') {
+                            shotZones.add(row.Category_Value);
+                        }
+                    });
+
+                    populateFilters();
+                    
+                    // Filter to only show 'Overall' data by default
+                    playerData = rawData.filter(row => row.Category === 'Overall' && row.Category_Value === 'Overall');
                     filteredData = [...playerData];
                     
                     // Clear any previous errors
@@ -245,12 +281,37 @@
             });
         }
 
+        function populateFilters() {
+            const shotTypeFilter = document.getElementById('shotTypeFilter');
+            const shotZoneFilter = document.getElementById('shotZoneFilter');
+            
+            // Sort the values alphabetically
+            const sortedShotTypes = Array.from(shotTypes).sort();
+            const sortedShotZones = Array.from(shotZones).sort();
+            
+            // Populate shot types
+            sortedShotTypes.forEach(type => {
+                const option = document.createElement('option');
+                option.value = type;
+                option.textContent = type;
+                shotTypeFilter.appendChild(option);
+            });
+            
+            // Populate shot zones
+            sortedShotZones.forEach(zone => {
+                const option = document.createElement('option');
+                option.value = zone;
+                option.textContent = zone;
+                shotZoneFilter.appendChild(option);
+            });
+        }
+
         function addFileDropZone() {
             const container = document.querySelector('.container');
             const dropZone = document.createElement('div');
             dropZone.innerHTML = `
                 <div style="border: 2px dashed #ccc; padding: 40px; text-align: center; margin: 20px 0; border-radius: 10px;">
-                    <p>Drag and drop your xp.csv file here, or click to select</p>
+                    <p>Drag and drop your xp_comprehensive.csv file here, or click to select</p>
                     <input type="file" id="csvFileInput" accept=".csv" style="display: none;">
                     <button onclick="document.getElementById('csvFileInput').click()" style="background: #4CAF50; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer;">Select CSV File</button>
                 </div>
@@ -310,8 +371,6 @@
                 '<tr><td colspan="9" class="loading">Failed to load data</td></tr>';
         }
 
-
-
         function renderTable() {
             const tbody = document.getElementById('playerTableBody');
             tbody.innerHTML = '';
@@ -335,9 +394,9 @@
                     <td>${player.PLAYER_NAME || ''}</td>
                     <td>${player.TEAM_NAME || ''}</td>
                     <td class="numeric">${player.GamesPlayed || 0}</td>
-                    <td class="numeric">${player.Total_Shots || 0}</td>
-                    <td class="numeric">${player.Total_Points || 0}</td>
-                    <td class="numeric">${typeof player.Total_xP === 'number' ? player.Total_xP.toFixed(2) : player.Total_xP || 0}</td>
+                    <td class="numeric">${player.Shots || 0}</td>
+                    <td class="numeric">${player.Points || 0}</td>
+                    <td class="numeric">${typeof player.xP === 'number' ? player.xP.toFixed(2) : player.xP || 0}</td>
                     <td class="numeric ${overperfClass}">${typeof overperf === 'number' ? overperf.toFixed(2) : overperf}</td>
                     <td class="numeric">${typeof player.xP_per_Shot === 'number' ? player.xP_per_Shot.toFixed(3) : player.xP_per_Shot || 0}</td>
                     <td class="numeric ${overperfPerShotClass}">${typeof overperfPerShot === 'number' ? overperfPerShot.toFixed(3) : overperfPerShot}</td>
@@ -351,6 +410,10 @@
             document.getElementById('playerSearch').addEventListener('input', filterData);
             document.getElementById('teamSearch').addEventListener('input', filterData);
             document.getElementById('hideNonQualifiers').addEventListener('change', filterData);
+            
+            // Category filters
+            document.getElementById('shotTypeFilter').addEventListener('change', filterByCategory);
+            document.getElementById('shotZoneFilter').addEventListener('change', filterByCategory);
 
             // Sort functionality - attach to all sortable headers
             document.querySelectorAll('th.sortable').forEach(header => {
@@ -388,6 +451,43 @@
 
             renderTable();
         }
+        
+        function filterByCategory() {
+            const shotTypeValue = document.getElementById('shotTypeFilter').value;
+            const shotZoneValue = document.getElementById('shotZoneFilter').value;
+            
+            // Reset the other filter if one is selected
+            if (shotTypeValue && shotZoneValue) {
+                if (this.id === 'shotTypeFilter') {
+                    document.getElementById('shotZoneFilter').value = '';
+                } else if (this.id === 'shotZoneFilter') {
+                    document.getElementById('shotTypeFilter').value = '';
+                }
+            }
+            
+            const updatedShotType = document.getElementById('shotTypeFilter').value;
+            const updatedShotZone = document.getElementById('shotZoneFilter').value;
+            
+            if (updatedShotType) {
+                // Filter by Shot_Type
+                playerData = rawData.filter(row => 
+                    row.Category === 'Shot_Type' && row.Category_Value === updatedShotType
+                );
+            } else if (updatedShotZone) {
+                // Filter by Shot_Zone
+                playerData = rawData.filter(row => 
+                    row.Category === 'Shot_Zone' && row.Category_Value === updatedShotZone
+                );
+            } else {
+                // Default to Overall
+                playerData = rawData.filter(row => 
+                    row.Category === 'Overall' && row.Category_Value === 'Overall'
+                );
+            }
+            
+            // Apply regular filters
+            filterData();
+        }
 
         function applySortToFilteredData() {
             const column = currentSort.column;
@@ -402,7 +502,7 @@
                 if (valueB == null) valueB = direction === 'asc' ? '' : -Infinity;
 
                 // For numeric columns, convert to numbers
-                const numericColumns = ['GamesPlayed', 'Total_Shots', 'Total_Points', 'Total_xP', 'Overperformance', 'xP_per_Shot', 'Overperf_per_Shot'];
+                const numericColumns = ['GamesPlayed', 'Shots', 'Points', 'xP', 'Overperformance', 'xP_per_Shot', 'Overperf_per_Shot'];
                 if (numericColumns.includes(column)) {
                     valueA = parseFloat(valueA) || 0;
                     valueB = parseFloat(valueB) || 0;
