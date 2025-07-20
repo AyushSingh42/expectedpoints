@@ -12,6 +12,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 import csv_additions
+from xp_contextual_additions import approximate_context_from_action, lookup_fg_pct
 
 # Shot type mapping to group detailed action types into broader categories
 shot_type_mapping = {
@@ -65,33 +66,47 @@ shot_type_mapping = {
     "Turnaround Jump Shot": "Jump Shot"
 }
 
+def add_context_fg_pct(df):
+    """
+    Add contextual FG% columns using approximated context bins.
+    """
+    context_features = df.apply(
+        lambda row: lookup_fg_pct(
+            row['PLAYER_NAME'],
+            *approximate_context_from_action(row['ACTION_TYPE'])
+        ), axis=1, result_type='expand')
+    return pd.concat([df, context_features], axis=1)
+
 def load_and_preprocess_data():
     """Load and preprocess the shot data"""
     print("Loading shot data...")
     df = pd.read_csv("shot.csv", encoding='utf-8')
-    
+
     # Filter to shot attempts only
     df_clean = df[df["EVENT_TYPE"].isin(["Made Shot", "Missed Shot"])].copy()
-    
+
     # Remove shots from beyond half court
     df_clean["LOC_X"] = pd.to_numeric(df_clean["LOC_X"], errors="coerce")
     df_clean["LOC_Y"] = pd.to_numeric(df_clean["LOC_Y"], errors="coerce")
     df_clean = df_clean[(df_clean["LOC_Y"] <= 470) & (df_clean["LOC_Y"] >= 0) & (df_clean["LOC_X"].abs() <= 250)]
-    
+
     # Create target and features
     df_clean["SHOT_TYPE"] = df_clean["SHOT_TYPE"].str.strip()
     df_clean["POINT_VALUE"] = df_clean["SHOT_TYPE"].apply(lambda x: 3 if "3PT" in x else 2)
     df_clean["SHOT_MADE_FLAG"] = df_clean["SHOT_MADE"].apply(lambda x: 1 if str(x).upper() == "TRUE" else 0)
     df_clean["xP_target"] = df_clean["SHOT_MADE_FLAG"] * df_clean["POINT_VALUE"]
-    
+
     # Create additional features
     df_clean["GAME_CLOCK"] = df_clean["MINS_LEFT"] * 60 + df_clean["SECS_LEFT"]
     df_clean["SHOT_DISTANCE_SQUARED"] = df_clean["SHOT_DISTANCE"] ** 2
     df_clean["LOC_X_ABS"] = df_clean["LOC_X"].abs()
-    
+
     # Create shot type categories
     df_clean["SHOT_TYPE_CATEGORY"] = df_clean["ACTION_TYPE"].map(shot_type_mapping).fillna("Other")
-    
+
+    # Add contextual FG% stats
+    df_clean = add_context_fg_pct(df_clean)
+
     print(f"Processed {len(df_clean)} shots")
     return df_clean
 
