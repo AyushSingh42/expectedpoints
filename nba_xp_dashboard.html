@@ -106,16 +106,16 @@
             background-color: #e9ecef;
         }
         th.sortable::after {
-            content: ' �';
+            content: ' �';
             opacity: 0.5;
         }
         th.sort-asc::after {
-            content: ' �';
+            content: ' �';
             opacity: 1;
             color: #4CAF50;
         }
         th.sort-desc::after {
-            content: ' �';
+            content: ' �';
             opacity: 1;
             color: #4CAF50;
         }
@@ -183,15 +183,15 @@
             <table id="playerTable">
                 <thead>
                     <tr>
-                        <th data-column="PLAYER_NAME" class="sortable">Player</th>
-                        <th data-column="TEAM_NAME" class="sortable">Team</th>
-                        <th data-column="GamesPlayed" class="sortable numeric">Games</th>
-                        <th data-column="Shots" class="sortable numeric">Total Shots</th>
-                        <th data-column="Points" class="sortable numeric">Total Points</th>
-                        <th data-column="xP" class="sortable numeric">Total xP</th>
-                        <th data-column="Overperformance" class="sortable numeric">Overperformance</th>
-                        <th data-column="xP_per_Shot" class="sortable numeric">xP per Shot</th>
-                        <th data-column="Overperf_per_Shot" class="sortable numeric">Overperf per Shot</th>
+                        <th data-column="PLAYER_NAME" class="sortable">Player ↕</th>
+                        <th data-column="TEAM_NAME" class="sortable">Team ↕</th>
+                        <th data-column="GamesPlayed" class="sortable numeric">Games ↕</th>
+                        <th data-column="Shots" class="sortable numeric">Total Shots ↕</th>
+                        <th data-column="Points" class="sortable numeric">Total Points ↕</th>
+                        <th data-column="xP" class="sortable numeric">Total xP ↕</th>
+                        <th data-column="Overperformance" class="sortable numeric">Overperformance ↕</th>
+                        <th data-column="xP_per_Shot" class="sortable numeric">xP per Shot ↕</th>
+                        <th data-column="Overperf_per_Shot" class="sortable numeric">Overperf per Shot ↕</th>
                     </tr>
                 </thead>
                 <tbody id="playerTableBody">
@@ -422,7 +422,114 @@
                     console.log('Sorting by column:', column); // Debug log
                     sortTable(column);
                 });
+                
+                // Add double-click functionality for custom filters
+                header.addEventListener('dblclick', function() {
+                    const column = this.dataset.column;
+                    showCustomFilterDialog(column);
+                });
             });
+        }
+        
+        // Custom filter functionality
+        let customFilters = {};
+        let activeFilterInput = null;
+        
+        function showCustomFilterDialog(column) {
+            // Remove any existing filter input
+            if (activeFilterInput) {
+                activeFilterInput.remove();
+                activeFilterInput = null;
+            }
+            
+            const header = document.querySelector(`th[data-column="${column}"]`);
+            const currentFilter = customFilters[column] || '';
+            
+            // Create input element
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = currentFilter;
+            input.placeholder = 'e.g., >40, <100, =10';
+            input.style.cssText = `
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                z-index: 1000;
+                padding: 8px;
+                border: 2px solid #007bff;
+                border-radius: 4px;
+                font-size: 14px;
+                width: 200px;
+                background: white;
+                box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            `;
+            
+            // Add event listeners
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    applyFilter(column, this.value);
+                } else if (e.key === 'Escape') {
+                    this.remove();
+                    activeFilterInput = null;
+                }
+            });
+            
+            input.addEventListener('blur', function() {
+                setTimeout(() => {
+                    if (this.parentNode) {
+                        this.remove();
+                        activeFilterInput = null;
+                    }
+                }, 100);
+            });
+            
+            // Add to page and focus
+            document.body.appendChild(input);
+            activeFilterInput = input;
+            input.focus();
+            input.select();
+        }
+        
+        function applyFilter(column, value) {
+            if (value.trim() === '') {
+                delete customFilters[column];
+            } else {
+                customFilters[column] = value.trim();
+            }
+            filterData();
+            
+            // Remove input
+            if (activeFilterInput) {
+                activeFilterInput.remove();
+                activeFilterInput = null;
+            }
+        }
+        
+        function evaluateCustomFilter(value, filterExpression) {
+            if (!filterExpression) return true;
+            
+            const numValue = parseFloat(value);
+            if (isNaN(numValue)) return true; // Skip non-numeric values
+            
+            // Parse the filter expression
+            const match = filterExpression.match(/^([<>=!]+)(.+)$/);
+            if (!match) return true; // Invalid expression, don't filter
+            
+            const operator = match[1];
+            const filterValue = parseFloat(match[2]);
+            
+            if (isNaN(filterValue)) return true; // Invalid number, don't filter
+            
+            switch (operator) {
+                case '>': return numValue > filterValue;
+                case '<': return numValue < filterValue;
+                case '>=': return numValue >= filterValue;
+                case '<=': return numValue <= filterValue;
+                case '=': return numValue === filterValue;
+                case '!=': return numValue !== filterValue;
+                default: return true;
+            }
         }
 
         function filterData() {
@@ -440,8 +547,14 @@
                 const rateStats = ['xP_per_Shot', 'Overperf_per_Shot'];
                 const isRateStat = rateStats.includes(currentSort.column);
                 const meetsGamesRequirement = !hideNonQualifiers || !isRateStat || (player.GamesPlayed >= 58);
+                
+                // Apply custom filters
+                const matchesCustomFilters = Object.keys(customFilters).every(column => {
+                    const filterExpression = customFilters[column];
+                    return evaluateCustomFilter(player[column], filterExpression);
+                });
 
-                return matchesPlayer && matchesTeam && meetsGamesRequirement;
+                return matchesPlayer && matchesTeam && meetsGamesRequirement && matchesCustomFilters;
             });
 
             // Apply current sort to filtered data
